@@ -18,7 +18,17 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 
+// OAuth client ID from Google Cloud Console (public, safe to commit).
+const GOOGLE_CLIENT_ID = '';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+const DRIVE_FILE = 'live-notes.json';
+const DRIVE_API = 'https://www.googleapis.com';
+
 let notes = store.get('notes', []);
+let deleted = store.get('deleted', {}); // note id -> deletion time, so deletes sync too
+let driveToken = null;
+let syncing = false;
+let syncTimer = null;
 let currentId = null;
 let listening = false;
 let recognition = null;
@@ -276,6 +286,7 @@ function saveCurrent() {
   Object.assign(note, { title: $('title').value.trim(), text, translation, updated: Date.now() });
   store.set('notes', notes);
   renderNotes();
+  scheduleSync();
 }
 
 function scheduleSave() {
@@ -323,7 +334,10 @@ function renderNotes() {
     del.onclick = () => {
       if (!confirm(`Delete "${note.title}"?`)) return;
       notes = notes.filter((n) => n.id !== note.id);
+      deleted[note.id] = Date.now();
       store.set('notes', notes);
+      store.set('deleted', deleted);
+      scheduleSync();
       if (currentId === note.id) loadNote(null);
       renderNotes();
     };
@@ -409,7 +423,9 @@ async function makeQuiz() {
       Number.isInteger(q.answer) && q.answer >= 0 && q.answer < q.options.length);
     if (!quiz.length) throw new Error('Gemini did not return a usable quiz. Try again.');
     note.quiz = quiz;
+    note.updated = Date.now();
     store.set('notes', notes);
+    scheduleSync();
     quizAnswers = [];
   });
   renderQuiz();
@@ -421,6 +437,114 @@ async function copyFrom(el) {
     await navigator.clipboard.writeText(el.value);
     setStatus('Copied.');
   } catch { setStatus('Could not copy — select the text and copy manually.', true); }
+}
+
+/* ---------- Google Drive sync ---------- */
+
+function setDriveStatus(msg, isError = false) {
+  $('driveStatus').textContent = msg;
+  $('driveStatus').style.color = isError ? 'var(--danger)' : '';
+  const linked = store.get('driveLinked', false);
+  $('driveBtn').textContent = linked ? 'Sync now' : 'Sign in with Google';
+  $('driveOutBtn').hidden = !linked;
+}
+
+function requestDriveToken() {
+  return new Promise((resolve, reject) => {
+    if (!GOOGLE_CLIENT_ID) return reject(new Error('Google sign-in is not set up yet.'));
+    if (!window.google?.accounts?.oauth2) {
+      return reject(new Error('Google sign-in could not load. Check the connection and reload.'));
+    }
+    google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: DRIVE_SCOPE,
+      prompt: store.get('driveLinked', false) ? '' : 'select_account',
+      callback: (resp) => {
+        if (resp.error) return reject(new Error(resp.error_description || resp.error));
+        driveToken = { value: resp.access_token, expires: Date.now() + (resp.expires_in - 60) * 1000 };
+        resolve();
+      },
+      error_callback: (err) => reject(new Error(
+        err.type === 'popup_closed' ? 'Sign-in was cancelled.' : 'Sign-in failed. Allow pop-ups and try again.')),
+    }).requestAccessToken();
+  });
+}
+
+async function driveFetch(path, options = {}) {
+  const res = await fetch(DRIVE_API + path, {
+    ...options,
+    headers: { ...options.headers, Authorization: `Bearer ${driveToken.value}` },
+  });
+  if (res.status === 401) {
+    driveToken = null;
+    throw new Error('Google session expired. Tap Sync now to reconnect.');
+  }
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new Error(json.error?.message || `Google Drive request failed (${res.status})`);
+  }
+  return res.json();
+}
+
+// Newest version of each note wins; a delete wins over any older edit.
+function mergeRemote(remote) {
+  for (const [id, ts] of Object.entries(remote.deleted || {})) {
+    deleted[id] = Math.max(deleted[id] || 0, ts);
+  }
+  const before = currentNote();
+  const byId = new Map(notes.map((n) => [n.id, n]));
+  for (const n of Array.isArray(remote.notes) ? remote.notes : []) {
+    const local = byId.get(n.id);
+    if (!local || (n.updated || 0) > (local.updated || 0)) byId.set(n.id, n);
+  }
+  const time = (n) => n.updated || n.created || 0;
+  notes = [...byId.values()].filter((n) => !(deleted[n.id] >= time(n))).sort((a, b) => time(b) - time(a));
+  store.set('notes', notes);
+  store.set('deleted', deleted);
+  renderNotes();
+  const after = currentNote();
+  if (before && after !== before && !listening) loadNote(after || null);
+}
+
+async function syncDrive(interactive) {
+  if (syncing) return;
+  if (!driveToken || Date.now() > driveToken.expires) {
+    if (!interactive) {
+      if (store.get('driveLinked', false)) setDriveStatus('Not synced in this session yet. Tap Sync now.');
+      return;
+    }
+    try { await requestDriveToken(); } catch (err) { return setDriveStatus(err.message, true); }
+  }
+  syncing = true;
+  setDriveStatus('Syncing…');
+  try {
+    const q = encodeURIComponent(`name='${DRIVE_FILE}'`);
+    const list = await driveFetch(`/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id)`);
+    const fileId = list.files?.[0]?.id;
+    if (fileId) mergeRemote(await driveFetch(`/drive/v3/files/${fileId}?alt=media`));
+    const body = JSON.stringify({ notes, deleted });
+    if (fileId) {
+      await driveFetch(`/upload/drive/v3/files/${fileId}?uploadType=media`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body,
+      });
+    } else {
+      const form = new FormData();
+      form.append('metadata', new Blob(
+        [JSON.stringify({ name: DRIVE_FILE, parents: ['appDataFolder'] })], { type: 'application/json' }));
+      form.append('file', new Blob([body], { type: 'application/json' }));
+      await driveFetch('/upload/drive/v3/files?uploadType=multipart', { method: 'POST', body: form });
+    }
+    store.set('driveLinked', true);
+    setDriveStatus(`Synced with Google Drive at ${new Date().toLocaleTimeString([], { timeStyle: 'short' })}.`);
+  } catch (err) {
+    setDriveStatus(err.message, true);
+  }
+  syncing = false;
+}
+
+function scheduleSync() {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => syncDrive(false), 5000);
 }
 
 /* ---------- Wiring ---------- */
@@ -467,6 +591,15 @@ function init() {
     setStatus('');
   };
   for (const id of ['title', 'text', 'translation']) $(id).oninput = scheduleSave;
+
+  $('driveBtn').onclick = () => syncDrive(true);
+  $('driveOutBtn').onclick = () => {
+    driveToken = null;
+    store.set('driveLinked', false);
+    setDriveStatus('Disconnected. Notes stay on this device and in Drive.');
+  };
+  setDriveStatus(!GOOGLE_CLIENT_ID ? 'Google sign-in is not set up yet.'
+    : store.get('driveLinked', false) ? 'Tap Sync now to sync this session.' : '');
 
   renderNotes();
   showView('record');

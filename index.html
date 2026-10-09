@@ -154,6 +154,15 @@
       </label>
       <p class="hint">The key is stored only in this browser. It is needed for fixing mistakes, quizzes, translation and audio-file transcription. Live listening works without it.</p>
     </section>
+    <section class="card">
+      <h2>Google Drive backup</h2>
+      <div class="row">
+        <button id="driveBtn" class="primary">Sign in with Google</button>
+        <button id="driveOutBtn" hidden>Disconnect</button>
+      </div>
+      <p class="hint" id="driveStatus"></p>
+      <p class="hint">Notes, translations and quizzes are saved to a private app folder in your Google Drive and shared between your devices. The Gemini key is not synced.</p>
+    </section>
   </div>
 </main>
 
@@ -175,6 +184,7 @@
     Settings
   </button>
 </nav>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="app.js"></script>
 </body>
 </html>
