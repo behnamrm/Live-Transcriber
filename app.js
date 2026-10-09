@@ -19,7 +19,7 @@ const store = {
 };
 
 // OAuth client ID from Google Cloud Console (public, safe to commit).
-const GOOGLE_CLIENT_ID = '';
+const GOOGLE_CLIENT_ID = '12861675375-rnkp5863k2e2cnulumrbbbrh235g4ga3.apps.googleusercontent.com';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 const DRIVE_FILE = 'live-notes.json';
 const DRIVE_API = 'https://www.googleapis.com';
