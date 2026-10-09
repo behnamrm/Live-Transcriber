@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#4f46e5">
+<title>Live Notes</title>
+<style>
+  :root {
+    --bg: #f6f6fb; --card: #ffffff; --text: #1c1b29; --muted: #6b6a80;
+    --line: #e3e2ee; --accent: #4f46e5; --accent-text: #ffffff; --danger: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12121a; --card: #1c1c28; --text: #ececf5; --muted: #9a99b0;
+      --line: #2e2e40; --accent: #7c74ff; --accent-text: #0e0e16; --danger: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 16px 16px 64px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row > label { flex: 1 1 160px; font-size: 13px; color: var(--muted); }
+  select, input[type=text], input[type=password], textarea {
+    width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font: inherit;
+  }
+  textarea { min-height: 180px; resize: vertical; }
+  #translation { min-height: 120px; }
+  button {
+    padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--card); color: var(--text); font: inherit; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button.danger { color: var(--danger); }
+  #recBtn { width: 100%; padding: 14px; font-size: 17px; margin: 12px 0 0; }
+  #recBtn.on { background: var(--danger); border-color: var(--danger); color: #fff; }
+  #interim { color: var(--muted); min-height: 1.5em; margin: 6px 2px 0; font-style: italic; }
+  #status { font-size: 13px; color: var(--muted); min-height: 1.4em; margin-top: 8px; }
+  #status.error { color: var(--danger); }
+  #title { font-weight: 600; margin-bottom: 8px; }
+  .note { display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+  .note:first-child { border-top: 0; }
+  .note button.open { flex: 1; text-align: start; border: 0; background: none; padding: 0; min-width: 0; }
+  .note .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .note .d { font-size: 12px; color: var(--muted); }
+  .hint { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Live Notes</h1>
+    <button id="settingsBtn">Settings</button>
+  </header>
+
+  <section class="card" id="settings" hidden>
+    <h2>Settings</h2>
+    <label>Gemini API key (free, from aistudio.google.com/apikey)
+      <input type="password" id="apiKey" autocomplete="off" placeholder="Paste key here">
+    </label>
+    <label style="display:block;margin-top:8px">Gemini model
+      <input type="text" id="model" placeholder="gemini-flash-latest">
+    </label>
+    <p class="hint">The key is stored only in this browser. It is needed for fixing mistakes, translation and audio-file transcription. Live listening works without it.</p>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <label>Spoken language <select id="lang"></select></label>
+      <label>Translate to <select id="target"></select></label>
+    </div>
+    <button id="recBtn" class="primary">Start listening</button>
+    <div id="interim" dir="auto"></div>
+    <div id="status"></div>
+  </section>
+
+  <section class="card">
+    <input type="text" id="title" dir="auto" placeholder="Note title">
+    <h2>Transcript</h2>
+    <textarea id="text" dir="auto" placeholder="Your words appear here as you speak. You can also type or edit."></textarea>
+    <div id="translationBox" hidden>
+      <h2 style="margin-top:12px">Translation</h2>
+      <textarea id="translation" dir="auto"></textarea>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="fixBtn">Fix mistakes</button>
+      <button id="fileBtn">Transcribe audio file</button>
+      <button id="copyBtn">Copy</button>
+      <button id="exportBtn">Export .md</button>
+      <button id="shareBtn">Share</button>
+      <button id="newBtn" class="primary">New note</button>
+    </div>
+    <input type="file" id="file" accept="audio/*,video/mp4,video/webm" hidden>
+    <p class="hint">For NotebookLM: Export or Copy, then add it as a source in a notebook to make quizzes, flashcards or summaries.</p>
+  </section>
+
+  <section class="card">
+    <h2>Saved notes</h2>
+    <div id="notes"></div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
