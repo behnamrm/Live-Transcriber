@@ -26,26 +26,50 @@ let pendingTranslation = '';
 let translateTimer = null;
 let saveTimer = null;
 
+const VIEWS = ['record', 'notes', 'quiz', 'settings'];
+const QUIZ_SCHEMA = {
+  type: 'ARRAY',
+  items: {
+    type: 'OBJECT',
+    properties: {
+      question: { type: 'STRING' },
+      options: { type: 'ARRAY', items: { type: 'STRING' } },
+      answer: { type: 'INTEGER' },
+    },
+    required: ['question', 'options', 'answer'],
+  },
+};
+let quizAnswers = [];
+
 function setStatus(msg, isError = false) {
-  $('status').textContent = msg;
-  $('status').classList.toggle('error', isError);
+  for (const el of document.querySelectorAll('.status')) {
+    el.textContent = msg;
+    el.classList.toggle('error', isError);
+  }
+}
+
+function showView(name) {
+  for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
+  for (const btn of document.querySelectorAll('nav button')) {
+    if (btn.dataset.view === name) btn.setAttribute('aria-current', 'page');
+    else btn.removeAttribute('aria-current');
+  }
+  if (name === 'quiz') renderQuiz();
+  window.scrollTo(0, 0);
 }
 
 /* ---------- Gemini ---------- */
 
-async function gemini(parts) {
+async function gemini(parts, generationConfig) {
   const key = store.get('geminiKey', '');
-  if (!key) {
-    $('settings').hidden = false;
-    throw new Error('Add your free Gemini API key in Settings first.');
-  }
+  if (!key) throw new Error('Add your free Gemini API key in the Settings tab first.');
   const model = store.get('geminiModel', '') || DEFAULT_MODEL;
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({ contents: [{ parts }] }),
+      body: JSON.stringify({ contents: [{ parts }], generationConfig }),
     },
   );
   const json = await res.json().catch(() => ({}));
@@ -265,7 +289,7 @@ function loadNote(note) {
   $('text').value = note?.text || '';
   $('translation').value = note?.translation || '';
   pendingTranslation = '';
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  quizAnswers = [];
 }
 
 function renderNotes() {
@@ -288,7 +312,11 @@ function renderNotes() {
     d.className = 'd';
     d.textContent = new Date(note.updated || note.created).toLocaleString();
     open.append(t, d);
-    open.onclick = () => { if (!listening) loadNote(note); };
+    open.onclick = () => {
+      if (listening) return;
+      loadNote(note);
+      showView('record');
+    };
     const del = document.createElement('button');
     del.className = 'danger';
     del.textContent = 'Delete';
@@ -322,6 +350,79 @@ function exportNote() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/* ---------- Quiz ---------- */
+
+const currentNote = () => notes.find((n) => n.id === currentId);
+
+function renderQuiz() {
+  const note = currentNote();
+  const quiz = note?.quiz || [];
+  $('quizNote').textContent = note
+    ? `From: ${note.title}`
+    : 'Record or open a note first, then make a quiz from it.';
+  $('quizBtn').textContent = quiz.length ? 'Make a new quiz' : 'Make quiz';
+  const box = $('quiz');
+  box.textContent = '';
+  let answered = 0;
+  let correct = 0;
+  quiz.forEach((q, qi) => {
+    const chosen = quizAnswers[qi];
+    const done = chosen !== undefined;
+    if (done) answered++;
+    if (chosen === q.answer) correct++;
+    const wrap = document.createElement('div');
+    wrap.className = 'q';
+    wrap.dir = 'auto';
+    const p = document.createElement('p');
+    p.textContent = `${qi + 1}. ${q.question}`;
+    wrap.append(p);
+    q.options.forEach((opt, oi) => {
+      const btn = document.createElement('button');
+      btn.textContent = opt;
+      btn.disabled = done;
+      if (done && oi === q.answer) btn.className = 'right';
+      else if (done && oi === chosen) btn.className = 'wrong';
+      btn.onclick = () => { quizAnswers[qi] = oi; renderQuiz(); };
+      wrap.append(btn);
+    });
+    box.append(wrap);
+  });
+  $('score').textContent = answered ? `Score: ${correct} / ${quiz.length}` : '';
+}
+
+async function makeQuiz() {
+  saveCurrent();
+  const note = currentNote();
+  if (!note || !note.text.trim()) return setStatus('Record or open a note with some text first.', true);
+  await withBusy($('quizBtn'), 'Making quiz…', async () => {
+    setStatus('');
+    const raw = await gemini([{
+      text: `Write ${$('quizCount').value} multiple-choice questions that test understanding of the ` +
+        'text below. Each question has exactly 4 options and one correct answer; "answer" is the ' +
+        'zero-based index of the correct option. Write the questions in the same language as ' +
+        `the text.\n\n${note.text}`,
+    }], { responseMimeType: 'application/json', responseSchema: QUIZ_SCHEMA });
+    let quiz = [];
+    try { quiz = JSON.parse(raw); } catch {}
+    quiz = (Array.isArray(quiz) ? quiz : []).filter((q) =>
+      q && typeof q.question === 'string' && Array.isArray(q.options) && q.options.length > 1 &&
+      Number.isInteger(q.answer) && q.answer >= 0 && q.answer < q.options.length);
+    if (!quiz.length) throw new Error('Gemini did not return a usable quiz. Try again.');
+    note.quiz = quiz;
+    store.set('notes', notes);
+    quizAnswers = [];
+  });
+  renderQuiz();
+}
+
+async function copyFrom(el) {
+  if (!el.value.trim()) return setStatus('Nothing to copy yet.');
+  try {
+    await navigator.clipboard.writeText(el.value);
+    setStatus('Copied.');
+  } catch { setStatus('Could not copy — select the text and copy manually.', true); }
+}
+
 /* ---------- Wiring ---------- */
 
 function init() {
@@ -341,7 +442,8 @@ function init() {
   };
   $('apiKey').onchange = () => store.set('geminiKey', $('apiKey').value.trim());
   $('model').onchange = () => store.set('geminiModel', $('model').value.trim());
-  $('settingsBtn').onclick = () => { $('settings').hidden = !$('settings').hidden; };
+  for (const btn of document.querySelectorAll('nav button')) btn.onclick = () => showView(btn.dataset.view);
+  $('quizBtn').onclick = makeQuiz;
 
   $('recBtn').onclick = toggleListening;
   $('fixBtn').onclick = fixMistakes;
@@ -350,12 +452,8 @@ function init() {
     if ($('file').files[0]) transcribeFile($('file').files[0]);
     $('file').value = '';
   };
-  $('copyBtn').onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(noteAsMarkdown().md);
-      setStatus('Copied.');
-    } catch { setStatus('Could not copy — select the text and copy manually.', true); }
-  };
+  $('copyBtn').onclick = () => copyFrom($('text'));
+  $('copyTrBtn').onclick = () => copyFrom($('translation'));
   $('exportBtn').onclick = exportNote;
   $('shareBtn').hidden = !navigator.share;
   $('shareBtn').onclick = () => {
@@ -371,6 +469,7 @@ function init() {
   for (const id of ['title', 'text', 'translation']) $(id).oninput = scheduleSave;
 
   renderNotes();
+  showView('record');
 }
 
 init();

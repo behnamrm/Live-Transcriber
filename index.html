@@ -2,18 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#4f46e5">
 <title>Live Notes</title>
 <style>
   :root {
     --bg: #f6f6fb; --card: #ffffff; --text: #1c1b29; --muted: #6b6a80;
-    --line: #e3e2ee; --accent: #4f46e5; --accent-text: #ffffff; --danger: #dc2626;
+    --line: #e3e2ee; --accent: #4f46e5; --accent-text: #ffffff; --danger: #dc2626; --ok: #16a34a;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #12121a; --card: #1c1c28; --text: #ececf5; --muted: #9a99b0;
-      --line: #2e2e40; --accent: #7c74ff; --accent-text: #0e0e16; --danger: #f87171;
+      --line: #2e2e40; --accent: #7c74ff; --accent-text: #0e0e16; --danger: #f87171; --ok: #4ade80;
     }
   }
   * { box-sizing: border-box; }
@@ -21,13 +21,15 @@
     margin: 0; background: var(--bg); color: var(--text);
     font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
-  main { max-width: 760px; margin: 0 auto; padding: 16px 16px 64px; }
-  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-  h1 { font-size: 22px; margin: 0; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px 16px calc(96px + env(safe-area-inset-bottom)); }
+  h1 { font-size: 22px; margin: 0 0 12px; }
   h2 { font-size: 15px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .row > label { flex: 1 1 160px; font-size: 13px; color: var(--muted); }
+  .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .head h2 { margin: 0; }
+  .head button { padding: 5px 12px; font-size: 14px; }
   select, input[type=text], input[type=password], textarea {
     width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--line);
     background: var(--bg); color: var(--text); font: inherit;
@@ -44,71 +46,135 @@
   #recBtn { width: 100%; padding: 14px; font-size: 17px; margin: 12px 0 0; }
   #recBtn.on { background: var(--danger); border-color: var(--danger); color: #fff; }
   #interim { color: var(--muted); min-height: 1.5em; margin: 6px 2px 0; font-style: italic; }
-  #status { font-size: 13px; color: var(--muted); min-height: 1.4em; margin-top: 8px; }
-  #status.error { color: var(--danger); }
-  #title { font-weight: 600; margin-bottom: 8px; }
+  .status { font-size: 13px; color: var(--muted); min-height: 1.4em; margin-top: 8px; }
+  .status.error { color: var(--danger); }
+  #title { font-weight: 600; margin-bottom: 12px; }
   .note { display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
   .note:first-child { border-top: 0; }
   .note button.open { flex: 1; text-align: start; border: 0; background: none; padding: 0; min-width: 0; }
   .note .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .note .d { font-size: 12px; color: var(--muted); }
   .hint { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+  .q { padding: 14px 0; border-top: 1px solid var(--line); }
+  .q p { margin: 0 0 8px; font-weight: 600; }
+  .q button { display: block; width: 100%; text-align: start; margin-top: 6px; }
+  .q button:disabled { opacity: 1; }
+  .q button.right { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .q button.wrong { border-color: var(--danger); color: var(--danger); }
+  #score { font-weight: 600; margin-top: 8px; }
+  nav {
+    position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: center;
+    background: var(--card); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom);
+  }
+  nav button {
+    flex: 1; max-width: 190px; border: 0; border-radius: 0; background: none; color: var(--muted);
+    padding: 8px 4px 10px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  nav button[aria-current=page] { color: var(--accent); font-weight: 600; }
+  nav svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <main>
-  <header>
-    <h1>Live Notes</h1>
-    <button id="settingsBtn">Settings</button>
-  </header>
+  <h1>Live Notes</h1>
 
-  <section class="card" id="settings" hidden>
-    <h2>Settings</h2>
-    <label>Gemini API key (free, from aistudio.google.com/apikey)
-      <input type="password" id="apiKey" autocomplete="off" placeholder="Paste key here">
-    </label>
-    <label style="display:block;margin-top:8px">Gemini model
-      <input type="text" id="model" placeholder="gemini-flash-latest">
-    </label>
-    <p class="hint">The key is stored only in this browser. It is needed for fixing mistakes, translation and audio-file transcription. Live listening works without it.</p>
-  </section>
+  <div id="view-record">
+    <section class="card">
+      <div class="row">
+        <label>Spoken language <select id="lang"></select></label>
+        <label>Translate to <select id="target"></select></label>
+      </div>
+      <button id="recBtn" class="primary">Start listening</button>
+      <div id="interim" dir="auto"></div>
+      <div class="status"></div>
+    </section>
 
-  <section class="card">
-    <div class="row">
-      <label>Spoken language <select id="lang"></select></label>
-      <label>Translate to <select id="target"></select></label>
-    </div>
-    <button id="recBtn" class="primary">Start listening</button>
-    <div id="interim" dir="auto"></div>
-    <div id="status"></div>
-  </section>
+    <section class="card">
+      <input type="text" id="title" dir="auto" placeholder="Note title">
+      <div class="head">
+        <h2>Transcript</h2>
+        <button id="copyBtn">Copy</button>
+      </div>
+      <textarea id="text" dir="auto" placeholder="Your words appear here as you speak. You can also type or edit."></textarea>
+      <div id="translationBox" hidden>
+        <div class="head" style="margin-top:12px">
+          <h2>Translation</h2>
+          <button id="copyTrBtn">Copy</button>
+        </div>
+        <textarea id="translation" dir="auto"></textarea>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="fixBtn">Fix mistakes</button>
+        <button id="fileBtn">Transcribe audio file</button>
+        <button id="exportBtn">Export .md</button>
+        <button id="shareBtn">Share</button>
+        <button id="newBtn" class="primary">New note</button>
+      </div>
+      <input type="file" id="file" accept="audio/*,video/mp4,video/webm" hidden>
+      <p class="hint">For NotebookLM: Export or Copy, then add it as a source in a notebook.</p>
+    </section>
+  </div>
 
-  <section class="card">
-    <input type="text" id="title" dir="auto" placeholder="Note title">
-    <h2>Transcript</h2>
-    <textarea id="text" dir="auto" placeholder="Your words appear here as you speak. You can also type or edit."></textarea>
-    <div id="translationBox" hidden>
-      <h2 style="margin-top:12px">Translation</h2>
-      <textarea id="translation" dir="auto"></textarea>
-    </div>
-    <div class="row" style="margin-top:10px">
-      <button id="fixBtn">Fix mistakes</button>
-      <button id="fileBtn">Transcribe audio file</button>
-      <button id="copyBtn">Copy</button>
-      <button id="exportBtn">Export .md</button>
-      <button id="shareBtn">Share</button>
-      <button id="newBtn" class="primary">New note</button>
-    </div>
-    <input type="file" id="file" accept="audio/*,video/mp4,video/webm" hidden>
-    <p class="hint">For NotebookLM: Export or Copy, then add it as a source in a notebook to make quizzes, flashcards or summaries.</p>
-  </section>
+  <div id="view-notes" hidden>
+    <section class="card">
+      <h2>Saved notes</h2>
+      <div id="notes"></div>
+    </section>
+  </div>
 
-  <section class="card">
-    <h2>Saved notes</h2>
-    <div id="notes"></div>
-  </section>
+  <div id="view-quiz" hidden>
+    <section class="card">
+      <h2>Quiz</h2>
+      <div id="quizNote" dir="auto"></div>
+      <div class="row" style="margin-top:10px">
+        <label>Questions
+          <select id="quizCount">
+            <option>5</option>
+            <option>10</option>
+            <option>15</option>
+          </select>
+        </label>
+        <button id="quizBtn" class="primary">Make quiz</button>
+      </div>
+      <div class="status"></div>
+      <div id="score"></div>
+      <div id="quiz"></div>
+    </section>
+  </div>
+
+  <div id="view-settings" hidden>
+    <section class="card">
+      <h2>Settings</h2>
+      <label>Gemini API key (free, from aistudio.google.com/apikey)
+        <input type="password" id="apiKey" autocomplete="off" placeholder="Paste key here">
+      </label>
+      <label style="display:block;margin-top:8px">Gemini model
+        <input type="text" id="model" placeholder="gemini-flash-latest">
+      </label>
+      <p class="hint">The key is stored only in this browser. It is needed for fixing mistakes, quizzes, translation and audio-file transcription. Live listening works without it.</p>
+    </section>
+  </div>
 </main>
+
+<nav>
+  <button data-view="record">
+    <svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+    Record
+  </button>
+  <button data-view="notes">
+    <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM9 10h7M9 14h7M9 18h4"/></svg>
+    Notes
+  </button>
+  <button data-view="quiz">
+    <svg viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01"/></svg>
+    Quiz
+  </button>
+  <button data-view="settings">
+    <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M16 5v4M8 15v4"/></svg>
+    Settings
+  </button>
+</nav>
 <script src="app.js"></script>
 </body>
 </html>
