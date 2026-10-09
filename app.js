@@ -139,7 +139,12 @@ function toggleListening() {
     saveCurrent();
   } else {
     listening = startRecognition();
-    if (listening) setStatus('Listening…');
+    // Chrome on Android plays a restart sound that the phone's own mic picks up.
+    if (listening) {
+      setStatus(/Android/i.test(navigator.userAgent)
+        ? 'Listening… Tip: set media volume to zero or use headphones for best results.'
+        : 'Listening…');
+    }
   }
   updateRecButton();
 }
