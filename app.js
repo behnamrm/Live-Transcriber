@@ -7,6 +7,8 @@ const LANGS = [
   ['zh-CN', 'Chinese'], ['ja-JP', 'Japanese'], ['ko-KR', 'Korean'],
 ];
 const DEFAULT_MODEL = 'gemini-flash-latest';
+const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+  (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1); // iPadOS
 const MAX_AUDIO_BYTES = 14 * 1024 * 1024; // inline requests are capped at ~20 MB after base64
 
 const store = {
@@ -69,17 +71,30 @@ function startRecognition() {
   }
   recognition = new SR();
   recognition.lang = $('lang').value;
-  recognition.continuous = true;
+  recognition.continuous = !IS_MOBILE;
   recognition.interimResults = true;
 
+  // Mobile browsers re-send the growing phrase as separate "final" results, which
+  // doubles words. There we take one phrase per session and commit it when it ends.
+  let phrase = '';
+  const commit = (chunk) => {
+    if (!chunk.trim()) return;
+    appendText($('text'), chunk);
+    queueTranslation(chunk);
+    scheduleSave();
+  };
+
   recognition.onresult = (e) => {
+    if (IS_MOBILE) {
+      phrase = e.results[e.results.length - 1][0].transcript;
+      $('interim').textContent = phrase;
+      return;
+    }
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const chunk = e.results[i][0].transcript;
       if (e.results[i].isFinal) {
-        appendText($('text'), chunk);
-        queueTranslation(chunk);
-        scheduleSave();
+        commit(chunk);
       } else {
         interim += chunk;
       }
@@ -97,6 +112,8 @@ function startRecognition() {
   };
   // Browsers end the session after a pause; keep going until the user stops.
   recognition.onend = () => {
+    commit(phrase);
+    phrase = '';
     $('interim').textContent = '';
     if (listening) {
       try { recognition.start(); } catch { setTimeout(() => listening && startRecognition(), 300); }
