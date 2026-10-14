@@ -119,6 +119,7 @@ function startRecognition() {
   };
 
   recognition.onresult = (e) => {
+    heardSpeech = true;
     if (IS_MOBILE) {
       phrase = e.results[e.results.length - 1][0].transcript;
       $('interim').textContent = phrase;
@@ -139,7 +140,13 @@ function startRecognition() {
     if (e.error === 'no-speech' || e.error === 'aborted') return;
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
       listening = false;
-      setStatus('Microphone permission was denied.', true);
+      setStatus(IN_APP_BROWSER ? IN_APP_HELP
+        : 'Microphone or speech service is blocked. Allow the microphone for this site in the browser settings.', true);
+    } else if (e.error === 'network') {
+      setStatus('The speech service cannot be reached. Check the internet connection.', true);
+    } else if (e.error === 'language-not-supported') {
+      listening = false;
+      setStatus('This phone\'s speech service does not support the chosen language.', true);
     } else {
       setStatus(`Speech error: ${e.error}`, true);
     }
@@ -159,6 +166,15 @@ function startRecognition() {
   return true;
 }
 
+const IN_APP_BROWSER = /; wv\)|FBAN|FBAV|Instagram|Line\/|Telegram|WhatsApp/i.test(navigator.userAgent);
+const IN_APP_HELP = 'This looks like a browser inside another app (WhatsApp, Telegram, Instagram…), ' +
+  'where live listening does not work. Tap the ⋮ menu and choose "Open in Chrome".';
+const NO_SPEECH_HELP = 'No words recognized yet. Make sure this page is open in Chrome (not inside ' +
+  'another app), the right spoken language is selected, and the "Google" app and "Speech ' +
+  'Recognition & Synthesis by Google" are installed and enabled on the phone.';
+let heardSpeech = false;
+let noSpeechTimer = null;
+
 function updateRecButton() {
   $('recBtn').textContent = listening ? 'Stop' : 'Start listening';
   $('recBtn').classList.toggle('on', listening);
@@ -175,9 +191,16 @@ function toggleListening() {
     listening = startRecognition();
     // Chrome on Android plays a restart sound that the phone's own mic picks up.
     if (listening) {
-      setStatus(/Android/i.test(navigator.userAgent)
-        ? 'Listening… Tip: set media volume to zero or use headphones for best results.'
-        : 'Listening…');
+      setStatus(IN_APP_BROWSER ? IN_APP_HELP
+        : /Android/i.test(navigator.userAgent)
+          ? 'Listening… Tip: set media volume to zero or use headphones for best results.'
+          : 'Listening…', IN_APP_BROWSER);
+      // Some phones start "listening" but their speech service never returns text.
+      heardSpeech = false;
+      clearTimeout(noSpeechTimer);
+      noSpeechTimer = setTimeout(() => {
+        if (listening && !heardSpeech) setStatus(IN_APP_BROWSER ? IN_APP_HELP : NO_SPEECH_HELP, true);
+      }, 12000);
     }
   }
   updateRecButton();
